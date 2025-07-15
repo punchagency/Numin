@@ -1,0 +1,997 @@
+// © Punch Script
+
+//@version=6
+indicator('Auto Harmonic Patterns with Table', shorttitle = 'HP-Punch', overlay = true, max_bars_back =160, max_lines_count = 500, max_labels_count = 500)
+
+//line style
+const string STYLE_SOLID = 'Solid'
+const string STYLE_DOTTED = 'Dotted'
+const string STYLE_DASHED = 'Dashed'
+
+//direction
+const string PATTERN_LONG = 'Only Long'
+const string PATTERN_SHORT = 'Only Short'
+const string PATTERN_ALL = 'Long and Short'
+
+//targets
+const string ENTRY = 'Entry'
+const string TARGET_ONE = 'Target 1'
+const string TARGET_TWO = 'Target 2'
+
+//sizes
+const string TINY = 'tiny'
+const string SMALL = 'small'
+const string NORMAL = 'normal'
+const string LARGE = 'large'
+
+//position
+const string BOTTOM = 'bottom'
+const string MIDDLE = 'middle'
+const string TOP = 'top'
+const string LEFT = 'left'
+const string CENTER = 'center'
+const string RIGHT = 'right'
+
+
+//standard Options
+const string XAC_EXT_OPTION1 = '1.130 - 1.414'
+const string XAC_EXT_OPTION2 = '1.272- 1.414'
+
+
+
+
+const string HIGH_LOW = 'High/Low'
+const string CLOSE = 'Close'
+const string STANDARD_FIRST = 'Standard First'
+const string NON_STANDARD_FIRST = 'Non Standard First'
+const string ONCE_PER_BAR = 'Once Per Bar'
+const string ONCE_PER_BAR_CLOSE = 'Once Per Bar Close'
+
+const string ONLYLASTONE = 'Only Last One(s)'
+const string ALL_PATTERNS = 'All Patterns'
+const string NONE = 'None'
+
+
+
+const string BREAKEVEN = 'Beak Even'
+const string TRAINLING = 'Trailing'
+const string DEFAULT = 'Default'
+const string MANUAL = 'Manual'
+const string REWARRISK = 'Reward/Risk'
+const string SPREAD = 'Spread'
+
+
+const string PATTERNLABBEL = 'Pattern&Label'
+const string PATTERNONLY = 'Only Pattern'
+const string LABELONLY = 'Only Label'
+const string AVAILABLEBARS = 'All Available Bars'
+const string STARINGDATE = 'Starting Date'
+const string NUMBEROFBARS = 'Number of Bars'
+
+//
+const map<string,string> position_map=map.new<string, string>()
+map.put(position_map, "top_center", position.top_center)
+map.put(position_map, "top_right", position.top_right)
+map.put(position_map, "top_left", position.top_left)
+map.put(position_map, "middle_center", position.middle_center)
+map.put(position_map, "middle_left", position.middle_left)
+map.put(position_map, "middle_right", position.middle_right)
+map.put(position_map, "bottom_center", position.bottom_center)
+map.put(position_map, "bottom_right", position.bottom_right)
+map.put(position_map, "bottom_left", position.bottom_left)
+
+//
+const string SETUP_INPUT_GROUP = '💎 SETUP 💎'
+timezoneUTC = input.int(0, 'Timezone/UTC', tooltip = 'You need to set Chart Timezone (UTC) for the Alert times and calculating the starting time for  Statistics Panel ', group = SETUP_INPUT_GROUP)
+sessionValue = input.session('0000-0000', 'Session', tooltip = 'Patterns are searched/found only in this session', group = SETUP_INPUT_GROUP)
+minZigZagPeriod = input.int(8, 'Mininum ZigZag Period', minval = 4, maxval = 50, tooltip = 'Mininum ZigZag Period to create new ZigZag wave', group = SETUP_INPUT_GROUP)
+errorRatePercent = input.int(8, 'Error Rate %', minval = 1, maxval = 20, group = SETUP_INPUT_GROUP)
+patternSizeMin = input.int(20, 'Pattern Size', minval = 10, maxval = 160, step = 1, inline = 'panel_position', group = SETUP_INPUT_GROUP)
+patternSizeMax = input.int(150, '', minval = 50, maxval = 200, step = 1, inline = 'panel_position', group = SETUP_INPUT_GROUP, tooltip = 'Minimum and Maximum Pattern sizes. Number of bars')
+minPatternHeight = input.int(0, 'Min Pattern Height %', step = 1, tooltip = 'If you want the pattern height to be above a certain rate of closing price, you can set minimum height.For example,if you enter 1 percent, patterns with pattern height greater than 1 percent of the closing height will be searched', group = SETUP_INPUT_GROUP)
+patternFinder = input.string(PATTERN_ALL, 'Find Patterns for', options = [PATTERN_ALL, PATTERN_LONG, PATTERN_SHORT], group = SETUP_INPUT_GROUP)
+patternThreshold = input.string(TARGET_TWO, 'Keep Pattern Until', options = [TARGET_ONE, TARGET_TWO], tooltip = 'Pattern gets deleted if the price reaches the target set by this option. also used for Statistics', group = SETUP_INPUT_GROUP)
+maxPatternPerBar = input.int(2, 'Max Patterns on each bar', minval = 1, maxval = 3, tooltip = 'Maximum Number of Patterns that can be found on each bar', group = SETUP_INPUT_GROUP)
+maxActivePatterns = input.int(8, 'Max Active Patterns', minval = 1, maxval = 20, tooltip = 'Maximum Number of Active Patterns on the Chart', group = SETUP_INPUT_GROUP)
+sessionPeriod = time(timeframe.period, sessionValue)
+
+//
+const string STATISTICS_GROUP = '💎 STATISTICS 💎'
+showStatisticPanel = input.bool(false, 'Show Statistics Panel', tooltip = 'if Enables, it starts searching from the first Available bar to the last bar, in statistic mode, Patterns are not visible', group = STATISTICS_GROUP)
+includedBars = input.string(AVAILABLEBARS, 'Included Bars', options = [AVAILABLEBARS, STARINGDATE, NUMBEROFBARS], tooltip = 'Choose statistic calculation range', group = STATISTICS_GROUP)
+dateInput = input.time(title = 'Start Date', defval = timestamp('01 01 2021 00:00'), inline = 'time', tooltip = 'Set the date to start calculating statistics. Requires \'Starting Date\' to be enabled.', group = STATISTICS_GROUP)
+numberOfBars = input.int(1000, 'Number of The Bars', minval = 100, step = 1, tooltip = 'Set Numbers of the Bars to start calculating statistic, needs \'Number of Bars\' enabled', group = STATISTICS_GROUP)
+showActivePattern = input.bool(false, 'Show Only Active Pattern', tooltip = 'if Enabled, Only Current active pattern are show in Statistic Panel', group = STATISTICS_GROUP)
+dontShowbackground = input.bool(false, 'Don\'t Show Background', group = STATISTICS_GROUP)
+panelPositionVerticalStat= input.string(TOP, 'Panel Postion', options = [BOTTOM, MIDDLE, TOP], inline = 'panel position', group = STATISTICS_GROUP)
+panelPositionHorizontalStat = input.string(CENTER, '', options = [LEFT, CENTER, RIGHT], inline = 'panel position', group = STATISTICS_GROUP)
+
+
+//
+const string EXTRAS_GROUP = '💎 EXTRAS 💎'
+patternBarsLimit = input.int(160, 'Remove Patters older than', minval = 20, step = 10, tooltip = 'It deactivates the patters if they didnt reach Target 2 or SL in user defined period', group = EXTRAS_GROUP)
+CDMinBars = input.int(1, 'Min number of bars between C-D points', inline = 'TEST', minval = 1, tooltip = 'Mininum Number of the bars between C and D points. If number of bars between C and D points is less, the pattern is not shown.', group = EXTRAS_GROUP)
+searchSamePatterns = input.bool(true, 'Dont Search Same Patterns', tooltip = 'If Enabled, it doesnt search  the same patterns if it is already active on the chart', group = EXTRAS_GROUP)
+updatePatterns = input.bool(true, 'Dont Update The Patterns', tooltip = 'If Enabled, the patterns will not be updated even when there is a new high/low in validation zone', group = EXTRAS_GROUP)
+keepLastPattern = input.bool(true, 'Keep Last Pattern on the Chart', tooltip = 'If Enabled, Last Pattern(s) stays on the Chart', group = EXTRAS_GROUP)
+lineStyle = input.string(STYLE_DASHED, 'Line Style', options = [STYLE_SOLID, STYLE_DASHED, STYLE_DOTTED], tooltip = 'If the Last Pattern gets Invalidated or reached Target 1, then its line style gets changed', group = EXTRAS_GROUP)
+
+
+//
+const string ACTIVE_PATTERN_GROUP = '💎 ACTIVE PATTERN 💎'
+dontShowPattern = input.bool(true, 'Dont Show Active Pattern Panel', group = ACTIVE_PATTERN_GROUP)
+panelSize = input.string(SMALL, 'Panel Size', options = [TINY, SMALL, NORMAL, LARGE], group = ACTIVE_PATTERN_GROUP)
+
+panelPositionVertical = input.string(TOP, 'Panel Postion', options = [BOTTOM, MIDDLE, TOP], inline = 'panel position', group = ACTIVE_PATTERN_GROUP)
+panelPositionHorizontal = input.string(CENTER, '', options = [LEFT, CENTER, RIGHT], inline = 'panel position', group = ACTIVE_PATTERN_GROUP)
+
+
+//
+const string ENTRY_EXIT_GROUP = '💎 Entry & Targets 💎'
+targetTooltip = 'Percentage of the distance between  D point and Pattern target'
+recommendedEntExtVisibility = input.bool(false, 'Show Recommended Entries & Targets', group = ENTRY_EXIT_GROUP)
+targetOne = input.int(40, 'Target 1 %', minval = 1, step = 1, tooltip = targetTooltip, group = ENTRY_EXIT_GROUP)
+targetTwo = input.int(94, 'Target 2 %', minval = 1, step = 1, tooltip = targetTooltip, group = ENTRY_EXIT_GROUP)
+entryPercent = input.int(10, 'Entry %', minval = 10, maxval = 40, tooltip = targetTooltip, group = ENTRY_EXIT_GROUP)
+entextLineStyle = input.string(STYLE_SOLID, 'Entry & Target Line Style', options = [STYLE_SOLID, STYLE_DASHED, STYLE_DOTTED], group = ENTRY_EXIT_GROUP)
+showLevels = input.bool(false, 'Show Only Levels', group = ENTRY_EXIT_GROUP)
+
+
+//
+const string STOP_LOSS_GROUP = '💎 STOP-LOSS💎'
+const string stopLossTypeTooltip = 'Break Even Stop-loss moves between Entry and Target1,\n Trailing: Stop-loss moves with price\n Spread: SL is D point±Spread value in Pips\n  Manual: manually set the stop-loss\n Default: does not change SL level'
+stopLossType = input.string(DEFAULT, 'Stop-Loss Type', options = [BREAKEVEN, TRAINLING, DEFAULT, MANUAL, REWARRISK, SPREAD], group = STOP_LOSS_GROUP, tooltip = stopLossTypeTooltip)
+breakEvenSLLevel = input.int(0, '[Break Even] SL Level %', minval = 0, step = 1, group = STOP_LOSS_GROUP, tooltip = 'Move Stop-loss between Entry and Target 1\n 0% means Entry level \n 100% means Target 1\n 50% means middle of Entry and Target 1')
+trailingSLLevel = input.string(TARGET_ONE, '[Trailing] Execute After', options = [ENTRY, TARGET_ONE], group = STOP_LOSS_GROUP, tooltip = 'Exercute Trailing Stop-loss after the price hit Entry Level or Target 1 ? ')
+trailingInitialLevel = input.int(1, '[Trailing] Initial Level', minval = 1, step = 1, group = STOP_LOSS_GROUP, tooltip = 'initial level of Trailing SL. Calculated using the distance between Entry Level and Target 1\n initial trailing Stop-loss calculation \n if it is 0.8: Entry - 0.8 * (Entry - Target 1) \n if it is 1.2: Entry - 1.2 * (Entry - Target 1)')
+manualSLLevel = input.int(1, '[Manual] SL Level %', minval = 1, step = 1, group = STOP_LOSS_GROUP, tooltip = 'If the price hits the Entry level, it sets the stop-loss level to ±x% in the opposite direction For bullish patterns, 1% means Stop-loss will be placed 1% below the Entry level. For bearish patterns stop-loss will be 1% above the Entry level')
+rewardRickRatio = input.int(1, '[Reward/Risk] Ratio', minval = 1, step = 1, group = STOP_LOSS_GROUP, tooltip = 'Executed when the price hits the Entry level. Stop-loss is calculated using the Reward/Risk ratio and Target 1.\n\nFor example, if you want Reward = 2 and Risk = 1, then Reward/Risk = 2/1 ⇒ Enter 2.\nSo: (Target1 - Entry) = 2 × (Entry - SL)')
+spreadInPips = input.int(0, '[Spread] Spread in Pips', minval = 0, step = 1, group = STOP_LOSS_GROUP, tooltip = 'This value in Pips is used to Calculate SL when profit hit Entry Level. SL = D ± Spread')
+setTargetByRR = input.bool(false, 'Set Reward By Reward/Risk', group = STOP_LOSS_GROUP, tooltip = 'you can Set the Target by Entry RR. this option can work if Default SL is used')
+RRTarget1 = input.int(1, 'Reward/Risk For Target1', minval = 0, step = 1, group = STOP_LOSS_GROUP, tooltip = 'Set RR for Target 1. if 1 Reward/Risk is 1/1. if 2 Rewar/Risk is 2/1')
+RRTarget2 = input.int(2, 'Reward/Risk For Target2', minval = 0, step = 1, group = STOP_LOSS_GROUP, tooltip = 'Set RR for Target 2. if 4 Reward/Risk is 4/1. if 3 Rewar/Risk is 3/1')
+
+
+//
+const string PATTERN_VALIDATION_GROUP = '💎 PATTERN VALIDATION ZONES 💎'
+showValidationZones = input.bool(true, 'Show Pattern Validation Zones', tooltip = 'Pattern Validation Zone is calculated using XABC points and Error rate', group = PATTERN_VALIDATION_GROUP)
+closePriceZone = input.bool(false, 'Close price must be in the Zone', tooltip = 'If you enable this option, the close price must be in validation zone when the pattern is formed otherwise the pattern gets invalidated and the indicator might find less patterns on the chart. No effect on Non-Standard patterns.', group = PATTERN_VALIDATION_GROUP)
+priceEntryCheck = input.bool(false, 'Price must be lower/higher than Entry', tooltip = 'When a Bullish Pattern formed, closing price may be higher than the Entry Level or when a Bearish Pattern formed, closing price may be lower than the Entry Level. The pattern may not be suitable for trade. If you enable option, then this patterns will be deactivated', group = PATTERN_VALIDATION_GROUP)
+lowHighPercent = input.float(0, 'Can be lower/higher %', minval = 0, maxval = 5, step = .1, tooltip = 'It may still be a good trade chance even if the closing price is 0.02% (by default) away from Entry.', group = PATTERN_VALIDATION_GROUP)
+invalidationSource = input.string(CLOSE, 'Source for Invalidation', options = [HIGH_LOW, CLOSE], tooltip = 'This source is used to check for Invalidation of the patterns.', group = PATTERN_VALIDATION_GROUP)
+validationLineStyle = input.string(STYLE_DOTTED, 'Line Style', options = [STYLE_SOLID, STYLE_DASHED, STYLE_DOTTED], tooltip = 'Line Style for Pattern Validation Zone lines ', group = PATTERN_VALIDATION_GROUP)
+
+
+//
+const string PREDICTION_GROUP = '💎 PREDICTION 💎'
+patternPrediction = input.bool(false, 'Patten Prediction/Possible Pattern', group = PREDICTION_GROUP, tooltip = 'If Enabled, XABC points possible pattern and its Zone are shown')
+showPrediction = input.string(PATTERNLABBEL, 'Show Prediction => ', options = [PATTERNLABBEL, PATTERNONLY, LABELONLY], group = PREDICTION_GROUP, tooltip = 'You can choose what you what you want to see')
+predictionLabelColor = input.color(color.new(#77777a, 0), 'Prediction Label Color', group = PREDICTION_GROUP, tooltip = 'Used for label')
+predictionTextColor = input.color(color.white, 'Prediction text color', group = PREDICTION_GROUP, tooltip = 'Used for label')
+patternLineWidth = input.int(3, 'Pattern line width', group = PREDICTION_GROUP, tooltip = 'Used for pattern')
+patternLineStyle = input.string(STYLE_SOLID, 'Pattern line style', options = [STYLE_SOLID, STYLE_DOTTED, STYLE_DASHED], group = PREDICTION_GROUP, tooltip = 'Used for pattern')
+predictedLineColor = input.color(color.new(#0606a3, 0), 'Predicted Line Color', group = PREDICTION_GROUP, tooltip = 'Used for pattern')
+predictionZoneColor = input.color(color.new(#0606a3, 88), 'Predicted Zone Color', group = PREDICTION_GROUP, tooltip = 'Used for Prediction Zone')
+predictionFor = input.string(PATTERN_ALL, 'Predictor For', options = [PATTERN_ALL, PATTERN_LONG, PATTERN_SHORT], group = PREDICTION_GROUP)
+
+
+//
+const string SEARCH_OPTIONS_GROUP = '💎 SEARCH OPTIONS 💎'
+searchPriority = input.string(STANDARD_FIRST, 'Search Priority', options = [STANDARD_FIRST, NON_STANDARD_FIRST], tooltip = 'You can choose which pattern type to search first here', group = SEARCH_OPTIONS_GROUP)
+standardPatternCheck = input.bool(true, 'Standard Patterns', tooltip = 'Enable/Disable All Standard Patterns', group = SEARCH_OPTIONS_GROUP)
+nonStandardPatternCheck = input.bool(true, 'Non-Standard Patterns', inline = 'searchopt', group = SEARCH_OPTIONS_GROUP)
+conservativeCheck = input.bool(true, 'Conservative', inline = 'searchopt', tooltip = 'If Enabled,head for H&S,top/bottom for double, top/bottom is used as stop-loss,otherwise right shoulder or half of the double top/bottom is used', group = SEARCH_OPTIONS_GROUP)
+otherPatternCheck = input.bool(true, 'Other Patterns', tooltip = 'Enable/Disable All Other Patterns', group = SEARCH_OPTIONS_GROUP)
+
+
+//
+const string STANDARD_PATTERN_GROUP = '💎 STANDARD PATTERNS TO SEARCH 💎'
+gartley = input.bool(true, 'Gartley', group = STANDARD_PATTERN_GROUP)
+butterfly = input.bool(true, 'Butterfly', group = STANDARD_PATTERN_GROUP)
+bat = input.bool(true, 'Bat', group = STANDARD_PATTERN_GROUP)
+crab = input.bool(true, 'Crab', group = STANDARD_PATTERN_GROUP)
+shark = input.bool(true, 'Shark', group = STANDARD_PATTERN_GROUP)
+cypher = input.bool(true, 'Cypher', group = STANDARD_PATTERN_GROUP, inline = 'cypher')
+xacExt = input.string(XAC_EXT_OPTION1, 'XAC_EXT', options = [XAC_EXT_OPTION1, XAC_EXT_OPTION2], group = STANDARD_PATTERN_GROUP, inline = 'cypher')
+alternateBat = input.bool(true, 'Alternate Bat', group = STANDARD_PATTERN_GROUP)
+deepCrab = input.bool(true, 'Deep Crab', group = STANDARD_PATTERN_GROUP)
+nenStar = input.bool(true, 'Nen Star', group = STANDARD_PATTERN_GROUP)
+threeDrive = input.bool(true, '3D Drive', group = STANDARD_PATTERN_GROUP)
+abToCd = input.bool(true, 'AB=CD', group = STANDARD_PATTERN_GROUP)
+
+
+//
+const string NON_STANDARD_PATTERN_GROUP = '💎 NON-STANDARD PATTERNS TO SEARCH 💎'
+descendingTrianglePattern = input.bool(true, 'Descending Triangle', group = NON_STANDARD_PATTERN_GROUP)
+ascendingTrianglePattern = input.bool(true, 'Ascending Triangle', group = NON_STANDARD_PATTERN_GROUP)
+symmetricalTrianglePattern = input.bool(true, 'Symmetrical Triangle', group = NON_STANDARD_PATTERN_GROUP)
+headShoulderPattern = input.bool(true, 'Head and Shoulders', group = NON_STANDARD_PATTERN_GROUP)
+inverseHeadShoulderPattern = input.bool(true, 'Inverse Head and Shoulders', group = NON_STANDARD_PATTERN_GROUP)
+doubleTopPattern = input.bool(true, 'Double Top', group = NON_STANDARD_PATTERN_GROUP)
+doubleBottomPattern = input.bool(true, 'Double Bottom', group = NON_STANDARD_PATTERN_GROUP)
+
+
+//
+const string OTHER_PATTERN_GROUP = '💎 OTHER PATTERNS TO SEARCH 💎'
+whiteSwan = input.bool(true, 'White Swan', group = OTHER_PATTERN_GROUP)
+blackSwan = input.bool(true, 'Black Swan', group = OTHER_PATTERN_GROUP)
+leonardo = input.bool(true, 'Leonardo', group = OTHER_PATTERN_GROUP)
+partizan = input.bool(true, 'Partizan', group = OTHER_PATTERN_GROUP)
+Five0 = input.bool(true, '5-0', group = OTHER_PATTERN_GROUP)
+antiGartley = input.bool(true, 'Anti-Gartley', group = OTHER_PATTERN_GROUP)
+antiButterfly = input.bool(true, 'Anti-Butterfly', group = OTHER_PATTERN_GROUP)
+antiBat = input.bool(true, 'Anti-Bat', group = OTHER_PATTERN_GROUP)
+anitShark = input.bool(true, 'Anti-Shark', group = OTHER_PATTERN_GROUP)
+antiCrab = input.bool(true, 'Anti-Crab', group = OTHER_PATTERN_GROUP)
+anitCypher = input.bool(true, 'Anti-Cypher', group = OTHER_PATTERN_GROUP)
+anitNenstar = input.bool(true, 'Anti-Nen Star', group = OTHER_PATTERN_GROUP)
+
+
+    
+
+
+
+const string ALERTS_GROUP = 'ALERTS'
+newPatternFound = input.bool(true, 'New Pattern Found', group = ALERTS_GROUP)
+standardAlerts = input.string(ONCE_PER_BAR_CLOSE, 'Standard/Others', options = [ONCE_PER_BAR, ONCE_PER_BAR_CLOSE], tooltip = 'Frequency for Standard and Other Patterns', group = ALERTS_GROUP)
+nonStandardAlerts = input.string(ONCE_PER_BAR, 'Non-Standard', options = [ONCE_PER_BAR, ONCE_PER_BAR_CLOSE], tooltip = 'Frequency for Non-Standard Patterns', group = ALERTS_GROUP)
+newPatternFoundlongCustomAlert = input.string('{{ticker}}, {{timeframe}}, {{time}}, {{pattern}}, New Pattern, Long, Close: {{close}}, Recommended: Entry: {{entry}}, T1: {{target1}}, T2: {{target2}}, SL: {{stoploss}}', 'Custom message for Long', tooltip = 'You can enter your custom bullish message for each alert', group = ALERTS_GROUP)
+newPatternFoundshortCustomAlert = input.string('{{ticker}}, {{timeframe}}, {{time}}, {{pattern}}, New Pattern, Short, Close: {{close}}, Recommended: Entry: {{entry}}, T1: {{target1}}, T2: {{target2}}, SL: {{stoploss}}', 'Custom message for Short', tooltip = 'You can enter your custom bearish message for each alert', group = ALERTS_GROUP)
+
+patternUpdated = input.bool(false, 'Pattern Updated', inline = 'patternupdate', group = ALERTS_GROUP)
+patternUpdatedAlerts = input.string(ONCE_PER_BAR, '', inline = 'patternupdate', options = [ONCE_PER_BAR, ONCE_PER_BAR_CLOSE], group = ALERTS_GROUP)
+patternUpdatedlongCustomAlert = input.string('{{ticker}}, {{timeframe}}, {{time}}, {{pattern}}, Updated, Long, Close: {{close}}, Recommended: Entry: {{entry}}, T1: {{target1}}, T2: {{target2}}, SL: {{stoploss}}', 'Custom message for Long', group = ALERTS_GROUP)
+patternUpdatedshortCustomAlert = input.string('{{ticker}}, {{timeframe}}, {{time}}, {{pattern}}, Updated, Short, Close: {{close}}, Recommended: Entry: {{entry}}, T1: {{target1}}, T2: {{target2}}, SL: {{stoploss}}', 'Custom message for Short', group = ALERTS_GROUP)
+
+enteredPosition = input.bool(true, 'Entered Position', inline = 'enteredPosition', group = ALERTS_GROUP)
+enteredPositionAlerts = input.string(ONCE_PER_BAR, '', inline = 'enteredPosition', options = [ONCE_PER_BAR, ONCE_PER_BAR_CLOSE], group = ALERTS_GROUP)
+enteredPositionLongCustomAlert = input.string('{{ticker}}, {{timeframe}}, {{time}}, {{pattern}}, Entered Position, Long, Close: {{close}}, Entry: {{entry}}, T1: {{target1}}, T2: {{target2}}, SL: {{stoploss}}', 'Custom message for Long', group = ALERTS_GROUP)
+enteredPositionShortCustomAlert = input.string('{{ticker}}, {{timeframe}}, {{time}}, {{pattern}}, Entered Position, Short, Close: {{close}}, Entry: {{entry}}, T1: {{target1}}, T2: {{target2}}, SL: {{stoploss}}', 'Custom message for Short', group = ALERTS_GROUP)
+
+reachedTargetOne = input.bool(true, 'Reached Target 1', inline = 'reachedTargetOne', group = ALERTS_GROUP)
+reachedTargetOnedAlerts = input.string(ONCE_PER_BAR, '', inline = 'reachedTargetOne', options = [ONCE_PER_BAR, ONCE_PER_BAR_CLOSE], group = ALERTS_GROUP)
+reachedTargetOneLongCustomAlert = input.string('{{ticker}}, {{timeframe}}, {{time}}, {{pattern}}, Reached Target 2, Long, Close: {{close}}, T2: {{target2}}', 'Custom message for Long', group = ALERTS_GROUP)
+reachedTargetOneShortCustomAlert = input.string('{{ticker}}, {{timeframe}}, {{time}}, {{pattern}}, Reached Target 2, Short, Close: {{close}}, T2: {{target2}}', 'Custom message for Short', group = ALERTS_GROUP)
+
+
+reachedTargetTwo = input.bool(true, 'Reached Target 2', inline = 'reachedTargetTwo', group = ALERTS_GROUP)
+reachedTargetTwodAlerts = input.string(ONCE_PER_BAR, '', inline = 'reachedTargetTwo', options = [ONCE_PER_BAR, ONCE_PER_BAR_CLOSE], group = ALERTS_GROUP)
+reachedTargetTwoLongCustomAlert = input.string('{{ticker}}, {{timeframe}}, {{time}}, {{pattern}}, Reached Target 2, Long, Close: {{close}}, T2: {{target2}}', group = ALERTS_GROUP)
+reachedTargetTwoShortCustomAlert = input.string('{{ticker}}, {{timeframe}}, {{time}}, {{pattern}}, Reached Target 2, Short, Close: {{close}}, T2: {{target2}}', 'Custom message for Short', group = ALERTS_GROUP)
+
+
+stopLoss = input.bool(true, 'Stop-Loss', inline = 'stopLoss', group = ALERTS_GROUP)
+stopLossAlerts = input.string(ONCE_PER_BAR_CLOSE, '', inline = 'stopLoss', options = [ONCE_PER_BAR, ONCE_PER_BAR_CLOSE], group = ALERTS_GROUP)
+stopLossLongCustomAlert = input.string('{{ticker}}, {{timeframe}}, {{time}}, {{pattern}}, Stop-loss, Long, Close: {{close}}, Stop-loss: {{stoploss}}', 'Custom message for Long', group = ALERTS_GROUP)
+stopLossShortCustomAlert = input.string('{{ticker}}, {{timeframe}}, {{time}}, {{pattern}}, Stop-loss, Long, Close: {{close}}, Stop-loss: {{stoploss}}', 'Custom message for Short', group = ALERTS_GROUP)
+
+
+invalidatedPattern = input.bool(true, 'Invalidated Pattern', inline = 'invalidatedPattern', group = ALERTS_GROUP)
+invalidatedPatternAlerts = input.string(ONCE_PER_BAR_CLOSE, '', inline = 'invalidatedPattern', options = [ONCE_PER_BAR, ONCE_PER_BAR_CLOSE], group = ALERTS_GROUP)
+invalidatedPatternLongCustomAlert = input.string('{{ticker}}, {{timeframe}}, {{time}}, {{pattern}}, Invalidated, Long, Close: {{close}}', 'Custom message for Long', group = ALERTS_GROUP)
+invalidatedPatternShortCustomAlert = input.string('{{ticker}}, {{timeframe}}, {{time}}, {{pattern}}, Invalidated, Short, Close: {{close}}', 'Custom message for Short', group = ALERTS_GROUP)
+
+
+ageInvalidation = input.bool(false, 'Invalidated by the Age', inline = 'ageInvalidation', group = ALERTS_GROUP)
+ageInvalidationAlerts = input.string(ONCE_PER_BAR_CLOSE, '', inline = 'ageInvalidation', options = [ONCE_PER_BAR, ONCE_PER_BAR_CLOSE], group = ALERTS_GROUP)
+ageInvalidationLongCustomAlert = input.string('{{ticker}}, {{timeframe}}, {{time}}, {{pattern}}, Invalidated by the Age, Long, Close: {{close}}', 'Custom message for Long', group = ALERTS_GROUP)
+ageInvalidationShortCustomAlert = input.string('{{ticker}}, {{timeframe}}, {{time}}, {{pattern}}, Invalidated by the Age, Short, Close: {{close}}', 'Custom message for Short', group = ALERTS_GROUP)
+
+
+//
+const string STYLES_AND_LABEL_GROUP = '💎 PATTERN STYLES, LABELS AND COLORS 💎'
+showRateBTWWaves = input.bool(true, 'Show rate between Waves', group = STYLES_AND_LABEL_GROUP)
+showXABCLabel = input.bool(false, 'Don\'t show XABCD Label', group = STYLES_AND_LABEL_GROUP)
+showShadedPattern = input.bool(true, 'Shaded Pattern', group = STYLES_AND_LABEL_GROUP)
+fillStyle = input.string(ONLYLASTONE, 'Fill', options = [ONLYLASTONE, ALL_PATTERNS], group = STYLES_AND_LABEL_GROUP)
+transparencyStyle = input.int(70, 'Transparency', group = STYLES_AND_LABEL_GROUP)
+patterLineWidth = input.int(2, 'Pattern Line Width', minval = 1, step = 1, group = STYLES_AND_LABEL_GROUP)
+patternLineStyleLabels = input.string(STYLE_SOLID, 'Pattern Line Style', options = [STYLE_SOLID, STYLE_DASHED, STYLE_DOTTED], group = STYLES_AND_LABEL_GROUP)
+// Define color inputs based on the image palette
+colorBlue = input.color(color.new(#0000FF, 0), '', group = STYLES_AND_LABEL_GROUP, inline = 'Pattern Colors')
+colorRed = input.color(color.new(#FF0000, 0), '', group = STYLES_AND_LABEL_GROUP, inline = 'Pattern Colors')
+colorGreen = input.color(color.new(#00FF00, 0), '', group = STYLES_AND_LABEL_GROUP, inline = 'Pattern Colors')
+colorGrey = input.color(color.new(#808080, 0), '', group = STYLES_AND_LABEL_GROUP, inline = 'Pattern Colors')
+colorOrange = input.color(color.new(#FFA500, 0), '', group = STYLES_AND_LABEL_GROUP, inline = 'Pattern Colors', tooltip = 'You can set colors for pattern')
+colorLightGrey = input.color(color.new(#D3D3D3, 0), '', group = STYLES_AND_LABEL_GROUP, inline = 'Pattern Colors-1')
+colorYellow = input.color(color.new(#FFFF00, 0), '', group = STYLES_AND_LABEL_GROUP, inline = 'Pattern Colors-1')
+colorOlive = input.color(color.new(#808000, 0), '', group = STYLES_AND_LABEL_GROUP, inline = 'Pattern Colors-1')
+colorPurple = input.color(color.new(#800080, 0), '', group = STYLES_AND_LABEL_GROUP, inline = 'Pattern Colors-1')
+colorAqua = input.color(color.new(#00FFFF, 0), '', group = STYLES_AND_LABEL_GROUP, inline = 'Pattern Colors-1')
+
+const array<color> colorOrder = array.from(colorBlue, colorRed, colorGreen, colorGrey, colorOrange, colorLightGrey, colorYellow, colorOlive, colorPurple, colorAqua)
+
+
+//
+const string ZIGZAG_GROUP = '💎 ZIGZAG 💎'
+showZigZag = input.bool(false, 'Show Zig Zag', inline = 'showZigZag', group = ZIGZAG_GROUP)
+zigZagUp = input.color(color.green, 'Up', inline = 'showZigZag', group = ZIGZAG_GROUP)
+zigZagDown = input.color(color.red, 'Down', inline = 'showZigZag', group = ZIGZAG_GROUP)
+
+
+
+
+// Arrays for zigzag and patterns
+var abcdlines = array.new_line(3)
+var abcdtype = array.new_int(2, 1)
+var wmlines = array.new_line(4)
+var wmtype = array.new_int(2, 1)
+var wmLabels = array.new_bool(9, false)
+var patterncount = array.new_int(26, 0)
+var zigzaglines = array.new_line(0)
+var zigzaglabels = array.new_label(0)
+var zigzagdir = array.new_int(0)
+var zigzagratios = array.new_float(0)
+
+// Arrays for table data
+var pattern_names = array.new_string(0)
+var pattern_entries = array.new_float(0)
+var pattern_tps = array.new_float(0)
+var pattern_tps2 = array.new_float(0)
+var pattern_sls = array.new_float(0)
+var pattern_times = array.new_int(0)
+var pattern_statuses = array.new_string(0)
+var entry_hit = array.new_bool(0)
+var tp_hit = array.new_bool(0)
+var tp2_hit = array.new_bool(0)
+var sl_hit = array.new_bool(0)
+var pattern_dirs = array.new_int(0) // New array to store direction
+var pattern_ages = array.new_int(0) // New array to store age in bars
+var max_table_rows = 10
+var table pattern_table = na
+var lastbar = last_bar_index
+allowedLimit=lastbar - bar_index <= patternBarsLimit
+// Constants
+int max_array_size = 10
+transparent = color.new(#FFFFFF, 100)
+err_min = (100 - errorRatePercent) / 100
+err_max = (100 + errorRatePercent) / 100
+
+//position parser
+position_parser(y,x)=>
+    pos=position_map.get(y+'_'+x)
+    pos
+
+// Initialize table
+if na(pattern_table)
+    pattern_table := table.new(position_parser(panelPositionVertical,panelPositionHorizontal), 7, max_table_rows + 1, border_width = 1)
+    table.cell(pattern_table, 0, 0, 'Pattern', bgcolor = color.gray, text_color = color.white)
+    table.cell(pattern_table, 1, 0, 'Dir', bgcolor = color.gray, text_color = color.white)
+    table.cell(pattern_table, 2, 0, 'Entry', bgcolor = color.gray, text_color = color.white)
+    table.cell(pattern_table, 3, 0, 'TP', bgcolor = color.gray, text_color = color.white)
+    table.cell(pattern_table, 4, 0, 'TP2', bgcolor = color.gray, text_color = color.white)
+    table.cell(pattern_table, 5, 0, 'SL', bgcolor = color.gray, text_color = color.white)
+    table.cell(pattern_table, 6, 0, 'Age', bgcolor = color.gray, text_color = color.white)
+lowIdx = ta.lowestbars(low, minZigZagPeriod)
+highIdx = ta.highestbars(high, minZigZagPeriod)
+// Pivot detection (time frame independent)
+pivots(length) =>
+    float ph = ta.highest(high, length) == high and highIdx == 0 ? high : na
+    float pl = ta.lowest(low, length) == low and lowIdx== 0 ? low : na
+    int dir = 0
+    iff_1 = not na(pl) and na(ph) ? -1 : dir[1]
+    dir := not na(ph)  and na(pl) ? 1 : iff_1
+    [dir, ph, pl]
+
+
+
+// Get extended direction and color
+get_edir(dir, y2, color colorValue) =>
+    eDir = dir
+    lineColor=colorValue
+    if array.size(zigzaglines) > 0
+        lastLine = array.get(zigzaglines, 0)
+        lastPivot = line.get_y1(lastLine)
+        eDir := (dir * y2 > dir * lastPivot ? 2 : 1) * dir
+        lineColor := not na(colorValue) ? colorValue: eDir == 2 ? zigZagUp : eDir == 1 ? zigZagUp : eDir == -1 ? zigZagDown : zigZagDown
+    [eDir, lineColor]
+
+// Add to zigzag lines
+add_to_zigzaglines(x1, y1, x2, y2, dir) =>
+    [eDir, lineColor] = get_edir(dir, y2, na)
+    color = showZigZag ? lineColor : transparent
+    zline = line.new(x1 = x1, y1 = y1, x2 = x2, y2 = y2, color = color, width = 1, style = line.style_solid)
+    array.unshift(zigzaglines, zline)
+
+// Add to zigzag labels
+add_to_zigzaglabels(x1, x2, y1, y2, dir) =>
+    [eDir, lineColor] = get_edir(dir, y2, colorOrder.get(7))
+    pivotLabel = eDir == 2 ? 'HH' : eDir == 1 ? 'LH' : eDir == -1 ? 'HL' : 'LL'
+    lastLineLen = 0.0
+    currentLineLen = math.abs(y2 - y1)
+    if array.size(zigzaglines) > 0
+        lastLine = array.get(zigzaglines, 0)
+        lastLineLen := math.abs(line.get_y2(lastLine) - line.get_y1(lastLine))
+        lastLineLen
+    ratio = math.round(lastLineLen != 0 ? currentLineLen / lastLineLen : 0, 3)
+    labelText = (showLevels ? pivotLabel : '') + (showLevels and showRateBTWWaves ? ' - ' : '') + (showRateBTWWaves ? str.tostring(ratio) : '')
+    yloc = dir > 0 ? yloc.abovebar : yloc.belowbar
+    labelStyle = dir > 0 ? label.style_label_down : label.style_label_up
+    labelSize = showRateBTWWaves and showLevels ? size.normal : size.small
+    // if bool(bar_index<patternBarsLimit)
+    zlabel = label.new(x = x2, y = y2, text = labelText, xloc = xloc.bar_index, yloc = yloc, color = lineColor, size = labelSize, style = labelStyle)
+    array.unshift(zigzaglabels, zlabel)
+    array.unshift(zigzagdir, eDir)
+    array.unshift(zigzagratios, ratio)
+    label.delete(zlabel)
+// Add to zigzag
+add_to_zigzag(dir, dirchanged, ph, pl, index) =>
+
+    value = dir == 1 ? ph : pl
+    y1 = dir == 1 ? ta.lowest(high, minZigZagPeriod) : ta.highest(low, minZigZagPeriod)
+    x1 = bar_index + (dir == 1 ? ta.lowestbars(high, minZigZagPeriod) : ta.highestbars(low, minZigZagPeriod))
+    x2 = index
+    y2 = value
+    skip = false
+    // 
+    if array.size(zigzaglines) > 0
+        if not bool(dirchanged)
+            lastline = array.get(zigzaglines, 0)
+            lasty2 = line.get_y2(lastline)
+            if lasty2 * dir > y2 * dir
+                skip := true
+            else
+                line.delete(array.shift(zigzaglines))
+                label.delete(array.shift(zigzaglabels))
+                array.shift(zigzagdir)
+                array.shift(zigzagratios)
+        if array.size(zigzaglines) > 0
+            lastLine = array.get(zigzaglines, 0)
+            x1 := line.get_x2(lastLine)
+            y1 := line.get_y2(lastLine)
+    outsideDeviationThreshold = math.abs(y1 - y2) / y1 * 100 > 0 //DeviationThreshold
+    if outsideDeviationThreshold and not skip
+        add_to_zigzaglabels(x1, x2, y1, y2, dir)
+        add_to_zigzaglines(x1, y1, x2, y2, dir)
+
+
+    if array.size(zigzaglines) > max_array_size
+        array.pop(zigzaglines)
+        array.pop(zigzaglabels)
+        array.pop(zigzagdir)
+        array.pop(zigzagratios)
+
+
+// Zigzag calculation
+
+zigzag(length) =>
+    [dir, ph, pl] = pivots(length)
+    dirchanged = ta.change(dir)
+    
+    if (not na(ph) or not na(pl) ) 
+        add_to_zigzag(dir, dirchanged, ph, pl, bar_index)
+    // log.info(str.tostring(x)+"_here")
+
+// Update table with pattern data (with uniqueness check and direction)
+update_table(pattern_name, dir, entry, tp, tp2, sl, pattern_time) =>
+    is_duplicate = false
+    if array.size(pattern_names) > 0
+        for i = 0 to array.size(pattern_names) - 1 by 1
+            if array.get(pattern_names, i) == pattern_name and math.abs(array.get(pattern_entries, i) - entry) < 0.01 and math.abs(array.get(pattern_tps, i) - tp) < 0.01 and math.abs(array.get(pattern_tps2, i) - tp2) < 0.01 and math.abs(array.get(pattern_sls, i) - sl) < 0.01 and array.get(pattern_statuses, i) == 'Pending'
+                is_duplicate := true
+                break
+    if not is_duplicate
+        array.unshift(pattern_names, pattern_name)
+        array.unshift(pattern_entries, entry)
+        array.unshift(pattern_tps, tp)
+        array.unshift(pattern_tps2, tp2)
+        array.unshift(pattern_sls, sl)
+        array.unshift(pattern_times, pattern_time)
+        array.unshift(pattern_statuses, 'Pending')
+        array.unshift(pattern_dirs, dir) // Store the direction
+        array.unshift(pattern_ages, 0) // Initialize age as 0 bars
+        array.unshift(entry_hit, false)
+        array.unshift(tp_hit, false)
+        array.unshift(tp2_hit, false)
+        array.unshift(sl_hit, false)
+        if array.size(pattern_names) > max_table_rows
+            array.pop(pattern_names)
+            array.pop(pattern_entries)
+            array.pop(pattern_tps)
+            array.pop(pattern_tps2)
+            array.pop(pattern_sls)
+            array.pop(pattern_times)
+            array.pop(pattern_statuses)
+            array.pop(pattern_dirs)
+            array.pop(pattern_ages)
+            array.pop(entry_hit)
+            array.pop(tp_hit)
+            array.pop(tp2_hit)
+            array.pop(sl_hit)
+
+// Update pattern ages
+update_pattern_ages() =>
+    if array.size(pattern_names) > 0
+        for i = 0 to array.size(pattern_names) - 1 by 1
+            if array.get(pattern_statuses, i) == 'Pending'
+                current_age = bar_index - array.get(pattern_times, i)
+                if (current_age>patternBarsLimit)
+                    array.remove(pattern_names,i)
+                    array.remove(pattern_ages,i)
+                    array.remove(pattern_times,i)
+                else
+                    array.set(pattern_ages, i, current_age)
+                    0
+                
+// Check pattern progress
+// check_pattern_progress() =>
+//     if array.size(pattern_names) > 0
+//         for i = 0 to array.size(pattern_names) - 1 by 1
+//             if array.get(pattern_statuses, i) == 'Pending'
+//                 var int bars_since = na
+//                 var bool is_bullish = false
+//                 entry_time = array.get(pattern_times, i)
+//                 entry_price = array.get(pattern_entries, i)
+//                 tp = array.get(pattern_tps, i)
+//                 tp2 = array.get(pattern_tps2, i)
+//                 sl = array.get(pattern_sls, i)
+//                 dir = array.get(pattern_dirs, i) // Use stored direction
+//                 is_bullish := dir > 0 // Determine bullish based on dir
+//                 bars_since := bar_index - entry_time
+//                 max_bars_monitor = patternBarsLimit
+//                 if bars_since <= max_bars_monitor
+//                     if not array.get(entry_hit, i)
+//                         hit_entry = is_bullish ? ta.crossover(close, entry_price) : ta.crossunder(close, entry_price)
+//                         if hit_entry
+//                             array.set(entry_hit, i, true)
+//                     if array.get(entry_hit, i) and not array.get(tp_hit, i)
+//                         hit_tp = is_bullish ? ta.crossover(high, tp) : ta.crossunder(low, tp)
+//                         if hit_tp
+//                             array.set(tp_hit, i, true)
+//                     if array.get(entry_hit, i) and not array.get(tp2_hit, i)
+//                         hit_tp2 = is_bullish ? ta.crossover(high, tp2) : ta.crossunder(low, tp2)
+//                         if hit_tp2
+//                             array.set(tp2_hit, i, true)
+//                     if array.get(entry_hit, i) and not array.get(sl_hit, i)
+//                         hit_sl = is_bullish ? ta.crossunder(low, sl) : ta.crossover(high, sl)
+//                         if hit_sl
+//                             array.set(sl_hit, i, true)
+//                 else if bars_since > max_bars_monitor
+//                     array.set(pattern_statuses, i, '✘')
+
+// // Display table for unresolved patterns
+display_table() =>
+    if array.size(pattern_names) > 0
+        table.clear(pattern_table, 0, 1, 6, max_table_rows)
+        row_count = 0
+        for i = 0 to array.size(pattern_names) - 1 by 1
+            if array.get(pattern_statuses, i) == 'Pending' and not array.get(sl_hit, i) // Exclude rows where SL is hit
+                var int bars_since = na
+                var bool is_bullish = false
+                entry_time = array.get(pattern_times, i)
+                entry_price = array.get(pattern_entries, i)
+                tp = array.get(pattern_tps, i)
+                tp2 = array.get(pattern_tps2, i)
+                sl = array.get(pattern_sls, i)
+                dir = array.get(pattern_dirs, i) // Use stored direction
+                is_bullish := dir > 0
+                bars_since := bar_index - entry_time
+                max_bars_monitor = patternBarsLimit
+                age = array.get(pattern_ages, i)
+                bgcolor_pattern = array.get(pattern_names, i) == 'Black Swan' ? color.blue : array.get(pattern_names, i) == 'White Swan' ? color.green : color.new(color.white, 80)
+                bgcolor_dir = dir > 0 ? color.green : color.red // Use dir for bgcolor
+                entry_status = array.get(entry_hit, i) ? '✔ ' + str.tostring(entry_price) : bars_since > max_bars_monitor or (is_bullish ? ta.crossunder(low, entry_price) : ta.crossover(high, entry_price)) ? '✘' : str.tostring(entry_price, '#.##')
+                tp_status = array.get(tp_hit, i) ? '✔ ' + str.tostring(tp) : array.get(sl_hit, i) ? '✘' : str.tostring(tp, '#.##')
+                tp2_status = array.get(tp2_hit, i) ? '✔ ' + str.tostring(tp2) : array.get(sl_hit, i) ? '✘' : str.tostring(tp2, '#.##')
+                sl_status = array.get(sl_hit, i) ? '✔ ' + str.tostring(sl) : array.get(entry_hit, i) and (is_bullish ? ta.crossunder(low, sl) : ta.crossover(high, sl)) ? '✘' : str.tostring(sl, '#.##')
+                if row_count < max_table_rows
+                    table.cell(pattern_table, 0, row_count + 1, array.get(pattern_names, i), bgcolor = bgcolor_pattern, text_color = color.white)
+                    table.cell(pattern_table, 1, row_count + 1, dir > 0 ? 'Long' : 'Short', bgcolor = bgcolor_dir, text_color = color.white)
+                    table.cell(pattern_table, 2, row_count + 1, entry_status, bgcolor = array.get(entry_hit, i) ? color.new(color.gray, 80) : bgcolor_dir, text_color = color.white)
+                    table.cell(pattern_table, 3, row_count + 1, tp_status, bgcolor = array.get(tp_hit, i) ? color.new(color.gray, 80) : bgcolor_dir, text_color = color.white)
+                    table.cell(pattern_table, 4, row_count + 1, tp2_status, bgcolor = array.get(tp2_hit, i) ? color.new(color.gray, 80) : bgcolor_dir, text_color = color.white)
+                    table.cell(pattern_table, 5, row_count + 1, sl_status, bgcolor = array.get(sl_hit, i) ? color.new(color.gray, 80) : bgcolor_dir, text_color = color.white)
+                    table.cell(pattern_table, 6, row_count + 1, str.tostring(age), bgcolor = bgcolor_dir, text_color = color.white)
+                    row_count := row_count + 1
+                    row_count
+
+// ABCD pattern calculation
+calculate_abcd() =>
+    abcd = false
+    var float entry = na
+    var float tp = na
+    var float tp2 = na
+    var float sl = na
+    if array.size(zigzagratios) >= 3 and array.size(zigzaglines) >= 4
+        abcRatio = array.get(zigzagratios, 2)
+        bcdRatio = array.get(zigzagratios, 1)
+        ab = array.get(zigzaglines, 3)
+        bc = array.get(zigzaglines, 2)
+        cd = array.get(zigzaglines, 1)
+        ab_time = math.abs(line.get_x1(ab) - line.get_x2(ab))
+        ab_price = math.abs(line.get_y1(ab) - line.get_y2(ab))
+        cd_time = math.abs(line.get_x1(cd) - line.get_x2(cd))
+        cd_price = math.abs(line.get_y1(cd) - line.get_y2(cd))
+        a = line.get_y1(ab)
+        b = line.get_y2(ab)
+        c = line.get_y1(cd)
+        d = line.get_y2(cd)
+        abcdDirection = a < b and a < c and c < b and c < d and a < d and b < d or a > b and a > c and c > b and c > d and a > d and b > d
+        dir = a < b and a < c and c < b and c < d and a < d and b < d ? 1 : a > b and a > c and c > b and c > d and a > d and b > d ? -1 : 0
+        time_ratio = cd_time / ab_time
+        price_ratio = cd_price / ab_price
+        if abcRatio >= 0.618 * err_min and abcRatio <= 0.786 * err_max and bcdRatio >= 1.272 * err_min and bcdRatio <= 1.618 * err_max and abcdDirection
+            abcd := true
+            array.set(abcdtype, 0, 1)
+            entry := d
+            tp := dir > 0 ? d + 0.618 * (b - a) : d - 0.618 * (a - b)
+            tp2 := dir > 0 ? d + 1.272 * (b - a) : d - 1.272 * (a - b)
+            sl := dir > 0 ? math.min(a, c) : math.max(a, c)
+            sl
+        if time_ratio >= err_min and time_ratio <= err_max and price_ratio >= err_min and price_ratio <= err_max and abcdDirection
+            abcd := true
+            array.set(abcdtype, 0, 2)
+            entry := d
+            tp := dir > 0 ? d + 0.618 * (b - a) : d - 0.618 * (a - b)
+            tp2 := dir > 0 ? d + 1.272 * (b - a) : d - 1.272 * (a - b)
+            sl := dir > 0 ? math.min(a, c) : math.max(a, c)
+            sl
+        if price_ratio >= 1.272 * err_min and price_ratio <= 1.618 * err_max and abcRatio >= 0.618 * err_min and abcRatio <= 0.786 * err_max and abcdDirection
+            abcd := true
+            array.set(abcdtype, 0, 3)
+            entry := d
+            tp := dir > 0 ? d + 0.618 * (b - a) : d - 0.618 * (a - b)
+            tp2 := dir > 0 ? d + 1.272 * (b - a) : d - 1.272 * (a - b)
+            sl := dir > 0 ? math.min(a, c) : math.max(a, c)
+            sl
+        if abcd
+            array.set(abcdlines, 0, ab)
+            array.set(abcdlines, 1, bc)
+            array.set(abcdlines, 2, cd)
+            array.set(abcdtype, 1, dir)
+            pattern_name = array.get(abcdtype, 0) == 1 ? 'ABCD' : array.get(abcdtype, 0) == 2 ? 'AB=CD' : 'ABCD Ext'
+            update_table(pattern_name, dir, entry, tp, tp2, sl, bar_index)
+    abcd
+
+// Draw ABCD patterns
+// draw_abcd() =>
+//     abcd = calculate_abcd()
+//     if array.size(abcdlines) > 2 and array.size(zigzaglines) >= 4
+//         ab = array.get(abcdlines, 0)
+//         bc = array.get(abcdlines, 1)
+//         cd = array.get(abcdlines, 2)
+//         abcd_type = array.get(abcdtype, 0)
+//         labelColor = colorOrder.get(0)
+//         dir = array.get(abcdtype, 1)
+//         labelStyle = dir > 0 ? label.style_label_down : label.style_label_up
+//         yloc = dir > 0 ? yloc.abovebar : yloc.belowbar
+//         labelText = abcd_type == 1 ? 'ABCD' : abcd_type == 2 ? 'AB=CD' : abcd_type == 3 ? 'ABCD Ext' : ''
+//         ab_zg = array.get(zigzaglines, 3)
+//         bc_zg = array.get(zigzaglines, 2)
+//         cd_zg = array.get(zigzaglines, 1)
+//         count_index = abcd_type * 2 - 2 + (dir > 0 ? 1 : 0)
+//         abcdLabel = label.new(x = line.get_x2(cd), y = line.get_y2(cd), text = labelText, xloc = xloc.bar_index, yloc = yloc, color = labelColor, size = size.normal, style = labelStyle)
+//         array.set(patterncount, count_index, array.get(patterncount, count_index) + 1)
+//         line.set_color(ab, labelColor)
+//         line.set_color(bc, labelColor)
+//         line.set_color(cd, labelColor)
+//         if abcd[1] and bc == bc_zg and ab == ab_zg
+//             label.delete(abcdLabel[1])
+//             array.set(patterncount, count_index, array.get(patterncount, count_index) - 1)
+//             line.set_color(ab, transparent)
+//             line.set_color(bc, transparent)
+//             line.set_color(cd, transparent)
+//         if not abcd or label.get_x(abcdLabel) == label.get_x(abcdLabel[1]) and label.get_y(abcdLabel) == label.get_y(abcdLabel[1])
+//             label.delete(abcdLabel)
+//             array.set(patterncount, count_index, array.get(patterncount, count_index) - 1)
+//         else
+//             line.set_color(ab, labelColor)
+//             line.set_color(bc, labelColor)
+//             line.set_color(cd, labelColor)
+
+// // Double top/bottom calculation
+calculate_double_top_pattern() =>
+    doubleTop = false
+    if array.size(zigzagdir) >= 4 and doubleTopPattern  and allowedLimit
+        var float entry = na
+        var float tp = na
+        var float tp2 = na
+        var float sl = na
+        var int dir = 0
+        value = line.get_y2(array.get(zigzaglines, 1))
+        highLow = array.get(zigzagdir, 1)
+        lvalue = line.get_y2(array.get(zigzaglines, 2))
+        lhighLow = array.get(zigzagdir, 2)
+        llvalue = line.get_y2(array.get(zigzaglines, 3))
+        llhighLow = array.get(zigzagdir, 3)
+        risk = math.abs(value - llvalue)
+        reward = math.abs(value - lvalue)
+        riskPerReward = risk * 100 / (risk + reward)
+        if highLow == 1 and llhighLow == 2 and lhighLow == -1 and riskPerReward < targetOne
+            doubleTop := true
+            dir := -1
+            entry := lvalue
+            tp := lvalue - (value - lvalue)
+            tp2 := lvalue - 2 * (value - lvalue)
+            sl := value
+            sl
+        if doubleTop
+            update_table('Double Top', dir, entry, tp, tp2, sl, bar_index)
+    doubleTop
+
+calculate_double_bottom_pattern() =>
+    doubleBottom = false
+    if array.size(zigzagdir) >= 4 and doubleBottomPattern and allowedLimit
+        var float entry = na
+        var float tp = na
+        var float tp2 = na
+        var float sl = na
+        var int dir = 0
+        value = line.get_y2(array.get(zigzaglines, 1))
+        highLow = array.get(zigzagdir, 1)
+        lvalue = line.get_y2(array.get(zigzaglines, 2))
+        lhighLow = array.get(zigzagdir, 2)
+        llvalue = line.get_y2(array.get(zigzaglines, 3))
+        llhighLow = array.get(zigzagdir, 3)
+        risk = math.abs(value - llvalue)
+        reward = math.abs(value - lvalue)
+        riskPerReward = risk * 100 / (risk + reward)
+        if highLow == -1 and llhighLow == -2 and lhighLow == 1 and riskPerReward < targetOne
+            doubleBottom := true
+            dir := 1
+            entry := lvalue
+            tp := lvalue + lvalue - value
+            tp2 := lvalue + 2 * (lvalue - value)
+            sl := value
+            sl
+        if doubleBottom
+            update_table('Double Bottom', dir, entry, tp, tp2, sl, bar_index)
+    doubleBottom
+    // Draw double patterns
+draw_double_top(doubleTop, colorValue) =>
+    if array.size(zigzagdir) >= 4
+        line1 = array.get(zigzaglines, 1)
+        line2 = array.get(zigzaglines, 2)
+        x1 = line.get_x1(line2)
+        y1 = line.get_y1(line2)
+        x2 = line.get_x2(line1)
+        y2 = line.get_y2(line1)
+        midline = line.get_y1(line1)
+        midlineIndex = line.get_x1(line1)
+        risk = math.abs(y2 - y1)
+        reward = math.abs(y2 - midline)
+        riskPerReward = math.round(risk * 100 / (risk + reward), 2)
+        base = line.new(x1 = x1, y1 = y1, x2 = x2, y2 = y2, color = colorValue, width = 2, style = line.style_solid)
+        count_index = 7
+        labelText = 'DT - ' + str.tostring(riskPerReward)
+        array.set(patterncount, count_index, array.get(patterncount, count_index) + 1)
+        baseLabel = label.new(x = x2, y = y2, text = labelText, yloc = yloc.abovebar, color = colorValue, style = label.style_label_down, textcolor = color.black, size = size.normal)
+        if line.get_x1(base) == line.get_x1(base[1])
+            line.delete(base[1])
+            label.delete(baseLabel[1])
+            array.set(patterncount, count_index, array.get(patterncount, count_index) - 1)
+        if not doubleTop
+            line.delete(base)
+            label.delete(baseLabel)
+            array.set(patterncount, count_index, array.get(patterncount, count_index) - 1)
+
+draw_double_bottom(doubleBottom, colorValue) =>
+    if array.size(zigzagdir) >= 4
+        line1 = array.get(zigzaglines, 1)
+        line2 = array.get(zigzaglines, 2)
+        x1 = line.get_x1(line2)
+        y1 = line.get_y1(line2)
+        x2 = line.get_x2(line1)
+        y2 = line.get_y2(line1)
+        midline = line.get_y1(line1)
+        midlineIndex = line.get_x1(line1)
+        risk = math.abs(y2 - y1)
+        reward = math.abs(y2 - midline)
+        riskPerReward = math.round(risk * 100 / (risk + reward), 2)
+        base = line.new(x1 = x1, y1 = y1, x2 = x2, y2 = y2, color = colorValue, width = 2, style = line.style_solid)
+        count_index = 6
+        labelText = 'DB - ' + str.tostring(riskPerReward)
+        array.set(patterncount, count_index, array.get(patterncount, count_index) + 1)
+        baseLabel = label.new(x = x2, y = y2, text = labelText, yloc = yloc.belowbar, color = colorValue, style = label.style_label_up, textcolor = color.black, size = size.normal)
+        if line.get_x1(base) == line.get_x1(base[1])
+            line.delete(base[1])
+            label.delete(baseLabel[1])
+            array.set(patterncount, count_index, array.get(patterncount, count_index) - 1)
+        if not doubleBottom
+            line.delete(base)
+            label.delete(baseLabel)
+            array.set(patterncount, count_index, array.get(patterncount, count_index) - 1)
+
+
+// WM pattern calculation
+calculate_wm_patterns() =>
+    wm_pattern = false
+    var float entry = na
+    var float tp = na
+    var float tp2 = na
+    var float sl = na
+    if array.size(zigzagdir) >= 5
+        yxaRatio = array.get(zigzagratios, 4)
+        xabRatio = array.get(zigzagratios, 3)
+        abcRatio = array.get(zigzagratios, 2)
+        bcdRatio = array.get(zigzagratios, 1)
+        xa = array.get(zigzaglines, 4)
+        ab = array.get(zigzaglines, 3)
+        bc = array.get(zigzaglines, 2)
+        cd = array.get(zigzaglines, 1)
+        x = line.get_y1(xa)
+        a = line.get_y2(xa)
+        b = line.get_y2(ab)
+        c = line.get_y1(cd)
+        d = line.get_y2(cd)
+        xadRatio = math.round(math.abs(a - d) / math.abs(x - a), 3)
+        dir = a > d ? 1 : -1
+        maxP1 = math.max(x, a)
+        maxP2 = math.max(c, d)
+        minP1 = math.min(x, a)
+        minP2 = math.min(c, d)
+        highPoint = math.min(maxP1, maxP2)
+        lowPoint = math.max(minP1, minP2)
+        if b < highPoint and b > lowPoint
+            if gartley and xabRatio >= 0.618 * err_min and xabRatio <= 0.618 * err_max and abcRatio >= 0.382 * err_min and abcRatio <= 0.886 * err_max and (bcdRatio >= 1.272 * err_min and bcdRatio <= 1.618 * err_max or xadRatio >= 0.786 * err_min and xadRatio <= 0.786 * err_max) and allowedLimit
+                wm_pattern := true
+                array.set(wmtype, 1, 0)
+                array.set(wmLabels, 0, true)
+                entry := d
+                tp := dir > 0 ? d + 0.618 * (b - a) : d - 0.618 * (a - b)
+                tp2 := dir > 0 ? d + 1.272 * (b - a) : d - 1.272 * (a - b)
+                sl := dir > 0 ? math.min(x, c) : math.max(x, c)
+                update_table('Gartley', dir, entry, tp, tp2, sl, bar_index)
+            else
+                array.set(wmLabels, 0, false)
+            if crab and xabRatio >= 0.382 * err_min and xabRatio <= 0.618 * err_max and abcRatio >= 0.382 * err_min and abcRatio <= 0.886 * err_max and (bcdRatio >= 2.24 * err_min and bcdRatio <= 3.618 * err_max or xadRatio >= 1.618 * err_min and xadRatio <= 1.618 * err_max) and allowedLimit
+                wm_pattern := true
+                array.set(wmtype, 1, 1)
+                array.set(wmLabels, 1, true)
+                entry := d
+                tp := dir > 0 ? d + 0.618 * (b - a) : d - 0.618 * (a - b)
+                tp2 := dir > 0 ? d + 1.272 * (b - a) : d - 1.272 * (a - b)
+                sl := dir > 0 ? math.min(x, c) : math.max(x, c)
+                update_table('Crab', dir, entry, tp, tp2, sl, bar_index)
+            else
+                array.set(wmLabels, 1, false)
+            if deepCrab and xabRatio >= 0.886 * err_min and xabRatio <= 0.886 * err_max and abcRatio >= 0.382 * err_min and abcRatio <= 0.886 * err_max and (bcdRatio >= 2.00 * err_min and bcdRatio <= 3.618 * err_max or xadRatio >= 1.618 * err_min and xadRatio <= 1.618 * err_max) and allowedLimit
+                wm_pattern := true
+                array.set(wmtype, 1, 2)
+                array.set(wmLabels, 2, true)
+                entry := d
+                tp := dir > 0 ? d + 0.618 * (b - a) : d - 0.618 * (a - b)
+                tp2 := dir > 0 ? d + 1.272 * (b - a) : d - 1.272 * (a - b)
+                sl := dir > 0 ? math.min(x, c) : math.max(x, c)
+                update_table('Deep Crab', dir, entry, tp, tp2, sl, bar_index)
+            else
+                array.set(wmLabels, 2, false)
+            if bat and xabRatio >= 0.382 * err_min and xabRatio <= 0.50 * err_max and abcRatio >= 0.382 * err_min and abcRatio <= 0.886 * err_max and (bcdRatio >= 1.618 * err_min and bcdRatio <= 2.618 * err_max or xadRatio >= 0.886 * err_min and xadRatio <= 0.886 * err_max) and allowedLimit
+                wm_pattern := true
+                array.set(wmtype, 1, 3)
+                array.set(wmLabels, 3, true)
+                entry := d
+                tp := dir > 0 ? d + 0.618 * (b - a) : d - 0.618 * (a - b)
+                tp2 := dir > 0 ? d + 1.272 * (b - a) : d - 1.272 * (a - b)
+                sl := dir > 0 ? math.min(x, c) : math.max(x, c)
+                update_table('Bat', dir, entry, tp, tp2, sl, bar_index)
+            else
+                array.set(wmLabels, 3, false)
+            if butterfly and xabRatio >= 0.786 * err_min and xabRatio <= 0.786 * err_max and abcRatio >= 0.382 * err_min and abcRatio <= 0.886 * err_max and (bcdRatio >= 1.618 * err_min and bcdRatio <= 2.618 * err_max or xadRatio >= 1.272 * err_min and xadRatio <= 1.618 * err_max) and allowedLimit
+                wm_pattern := true
+                array.set(wmtype, 1, 4)
+                array.set(wmLabels, 4, true)
+                entry := d
+                tp := dir > 0 ? d + 0.618 * (b - a) : d - 0.618 * (a - b)
+                tp2 := dir > 0 ? d + 1.272 * (b - a) : d - 1.272 * (a - b)
+                sl := dir > 0 ? math.min(x, c) : math.max(x, c)
+                update_table('Butterfly', dir, entry, tp, tp2, sl, bar_index)
+            else
+                array.set(wmLabels, 4, false)
+            if shark and abcRatio >= 1.13 * err_min and abcRatio <= 1.618 * err_max and bcdRatio >= 1.618 * err_min and bcdRatio <= 2.24 * err_max and xadRatio >= 0.886 * err_min and xadRatio <= 1.13 * err_max and allowedLimit
+                wm_pattern := true
+                array.set(wmtype, 1, 5)
+                array.set(wmLabels, 5, true)
+                entry := d
+                tp := dir > 0 ? d + 0.618 * (b - a) : d - 0.618 * (a - b)
+                tp2 := dir > 0 ? d + 1.272 * (b - a) : d - 1.272 * (a - b)
+                sl := dir > 0 ? math.min(x, c) : math.max(x, c)
+                update_table('Shark', dir, entry, tp, tp2, sl, bar_index)
+            else
+                array.set(wmLabels, 5, false)
+            if cypher and xabRatio >= 0.382 * err_min and xabRatio <= 0.618 * err_max and abcRatio >= 1.13 * err_min and abcRatio <= 1.414 * err_max and (bcdRatio >= 1.272 * err_min and bcdRatio <= 2.00 * err_max or xadRatio >= 0.786 * err_min and xadRatio <= 0.786 * err_max) and allowedLimit
+                wm_pattern := true
+                array.set(wmtype, 1, 6)
+                array.set(wmLabels, 6, true)
+                entry := d
+                tp := dir > 0 ? d + 0.618 * (b - a) : d - 0.618 * (a - b)
+                tp2 := dir > 0 ? d + 1.272 * (b - a) : d - 1.272 * (a - b)
+                sl := dir > 0 ? math.min(x, c) : math.max(x, c)
+                update_table('Cypher', dir, entry, tp, tp2, sl, bar_index)
+            else
+                array.set(wmLabels, 8, false)
+        if wm_pattern
+            array.set(wmlines, 0, xa)
+            array.set(wmlines, 1, ab)
+            array.set(wmlines, 2, bc)
+            array.set(wmlines, 3, cd)
+            array.set(wmtype, 0, dir)
+    wm_pattern
+
+// Draw WM patterns
+draw_wm_patterns(colorValue) =>
+    wm_pattern = calculate_wm_patterns()
+    if array.size(wmlines) >= 4 and array.size(zigzaglines) >= 5
+        xa = array.get(wmlines, 0)
+        ab = array.get(wmlines, 1)
+        bc = array.get(wmlines, 2)
+        cd = array.get(wmlines, 3)
+        dir = array.get(wmtype, 0)
+        type = array.get(wmtype, 1)
+        trendColor = colorValue
+        x = line.get_y1(xa)
+        xbar = line.get_x1(xa)
+        a = line.get_y2(xa)
+        abar = line.get_x2(xa)
+        b = line.get_y2(ab)
+        bbar = line.get_x2(ab)
+        c = line.get_y2(bc)
+        cbar = line.get_x2(bc)
+        d = line.get_y2(cd)
+        dbar = line.get_x2(cd)
+        line.set_color(xa, trendColor)
+        line.set_color(ab, trendColor)
+        line.set_color(bc, trendColor)
+        line.set_color(cd, trendColor)
+        ac = line.new(x1 = abar, y1 = a, x2 = cbar, y2 = c, color = trendColor, width = 2, style = line.style_solid)
+        xb = line.new(x1 = xbar, y1 = x, x2 = bbar, y2 = b, color = trendColor, width = 2, style = line.style_solid)
+        xd = line.new(x1 = xbar, y1 = x, x2 = dbar, y2 = d, color = trendColor, width = 2, style = line.style_solid)
+        bd = line.new(x1 = bbar, y1 = b, x2 = dbar, y2 = d, color = trendColor, width = 2, style = line.style_solid)
+        isGartley = array.get(wmLabels, 0)
+        isCrab = array.get(wmLabels, 1)
+        isDeepCrab = array.get(wmLabels, 2)
+        isBat = array.get(wmLabels, 3)
+        isButterfly = array.get(wmLabels, 4)
+        isShark = array.get(wmLabels, 5)
+        isCypher = array.get(wmLabels, 6)
+        is3Drives = array.get(wmLabels, 7)
+        isFiveZero = array.get(wmLabels, 8)
+        labelText = isGartley ? 'Gartley' : ''
+        labelText := labelText + (isCrab ? (labelText == '' ? '' : '\n') + 'Crab' : '')
+        labelText := labelText + (isDeepCrab ? (labelText == '' ? '' : '\n') + 'Deep Crab' : '')
+        labelText := labelText + (isBat ? (labelText == '' ? '' : '\n') + 'Bat' : '')
+        labelText := labelText + (isButterfly ? (labelText == '' ? '' : '\n') + 'Butterfly' : '')
+        labelText := labelText + (isShark ? (labelText == '' ? '' : '\n') + 'Shark' : '')
+        labelText := labelText + (isCypher ? (labelText == '' ? '' : '\n') + 'Cypher' : '')
+        labelText := labelText + (is3Drives ? (labelText == '' ? '' : '\n') + '3 Drive' : '')
+        labelText := labelText + (isFiveZero ? (labelText == '' ? '' : '\n') + '5-0' : '')
+        baseLabel = label.new(x = bbar, y = b, text = labelText, yloc = dir < 1 ? yloc.abovebar : yloc.belowbar, color = trendColor, style = dir < 1 ? label.style_label_down : label.style_label_up, textcolor = color.black, size = size.normal)
+        xa_zg = array.get(zigzaglines, 4)
+        ab_zg = array.get(zigzaglines, 3)
+        bc_zg = array.get(zigzaglines, 2)
+        cd_zg = array.get(zigzaglines, 1)
+        for i = 0 to 8 by 1
+            count_index = i * 2 + 8 + (dir > 0 ? 0 : 1)
+            if array.get(wmLabels, i) and xa != xa[1] and ab != ab[1] and bc != bc[1]
+                array.set(patterncount, count_index, array.get(patterncount, count_index) + 1)
+            if array.get(wmLabels, i)[1] and xa == xa_zg and ab == ab_zg and bc == bc_zg
+                array.set(patterncount, count_index, array.get(patterncount, count_index) - 1)
+        if wm_pattern[1] and not wm_pattern and xa == xa_zg and ab == ab_zg and bc == bc_zg
+            line.delete(ac[1])
+            line.delete(xb[1])
+            line.delete(xd[1])
+            line.delete(bd[1])
+            line.set_color(xa[1], transparent)
+            line.set_color(ab[1], transparent)
+            line.set_color(bc[1], transparent)
+            line.set_color(cd[1], transparent)
+            label.delete(baseLabel[1])
+        if not wm_pattern or label.get_x(baseLabel) == label.get_x(baseLabel[1]) and label.get_y(baseLabel) == label.get_y(baseLabel[1])
+            line.delete(ac)
+            line.delete(xb)
+            line.delete(xd)
+            line.delete(bd)
+            label.delete(baseLabel)
+
+// Main execution
+zigzag(minZigZagPeriod)
+// draw_abcd()
+doubleBottom=calculate_double_bottom_pattern()
+doubleTop=calculate_double_top_pattern()
+
+update_pattern_ages()
+draw_double_bottom(doubleBottom,colorOrder.get(1))
+draw_double_top(doubleTop,colorOrder.get(2))
+draw_wm_patterns(colorOrder.get(3))
+// check_pattern_progress()
+display_table()
